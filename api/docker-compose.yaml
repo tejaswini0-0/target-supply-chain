@@ -1,0 +1,106 @@
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.0
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+
+  kafka:
+    image: confluentinc/cp-kafka:7.5.0
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+
+  supply_chain_postgres:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+    volumes:
+      - ./../postgres_data:/var/lib/postgresql/data
+
+  neo4j:
+    image: neo4j:5.20.0
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      NEO4J_AUTH: neo4j/password
+    volumes:
+      - ./../neo4j_data:/data
+
+  supply_chain_api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:80"
+    environment:
+      POSTGRES_HOST: supply_chain_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+    volumes:
+      - ./app:/app
+    depends_on:
+      - supply_chain_postgres
+      - kafka
+      - neo4j
+
+  supply_chain_consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python kafka_consumer.py
+    environment:
+      POSTGRES_HOST: supply_chain_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+    volumes:
+      - ./app:/app
+    depends_on:
+      - supply_chain_postgres
+      - kafka
+      - neo4j
+
+  supply_chain_dashboard:
+    image: python:3.11
+    working_dir: /app
+    command: >
+      bash -c "pip install streamlit==1.36.0 pandas==2.2.2 psycopg2-binary==2.9.9
+               altair==5.3.0 requests==2.32.3 neo4j==5.20.0 &&
+               streamlit run streamlit_app.py --server.port 8501 --server.address 0.0.0.0"
+    ports:
+      - "8501:8501"
+    environment:
+      POSTGRES_HOST: supply_chain_postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: postgres
+      POSTGRES_PORT: 5432
+      NEO4J_URI: bolt://neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: password
+    volumes:
+      - ./../dashboard/app:/app
+    depends_on:
+      - supply_chain_postgres
+      - neo4j
